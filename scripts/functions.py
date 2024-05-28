@@ -105,12 +105,11 @@ def cost_func(
     time: float,
     distance: float,
     voc: float,
-    toll: float,
 ) -> float:  # time: hour, distance: mile/hour, voc: pound/km
     ave_occ = 1.6
     vot = 20  # value of time: pounds/hour
     d = distance * cons.CONV_MILE_TO_KM  # km
-    t = time + d * voc / (ave_occ * vot) + toll / (ave_occ * vot)
+    t = time + d * voc / (ave_occ * vot)
     return t  # total cost: hour
 
 
@@ -290,7 +289,6 @@ def create_igraph_network(
     edgeLengthList = []
     edgeTypeList = []
     edgeFormList = []
-    edgeTollList = []
     for _, link in road_links.iterrows():
         edge_name = link.e_id
         edge_from = link.from_id
@@ -298,13 +296,11 @@ def create_igraph_network(
         edge_length = link.geometry.length * cons.CONV_METER_TO_MILE  # miles
         edge_type = link.road_classification[0]
         edge_form = link.form_of_way
-        edge_toll = link.average_toll_cost
         edgeNameList.append(edge_name)
         edgeList.append((name_to_index[edge_from], name_to_index[edge_to]))
         edgeLengthList.append(edge_length)
         edgeTypeList.append(edge_type)
         edgeFormList.append(edge_form)
-        edgeTollList.append(edge_toll)  # !!! add toll
 
     edgeSpeedList = np.vectorize(initial_speed_func)(
         edgeTypeList,
