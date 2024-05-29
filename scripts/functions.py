@@ -105,11 +105,12 @@ def cost_func(
     time: float,
     distance: float,
     voc: float,
+    toll: float,
 ) -> float:  # time: hour, distance: mile/hour, voc: pound/km
     ave_occ = 1.6
     vot = 20  # value of time: pounds/hour
     d = distance * cons.CONV_MILE_TO_KM  # km
-    t = time + d * voc / (ave_occ * vot)
+    t = time + d * voc / (ave_occ * vot) + toll / (ave_occ * vot)  # hour
     return t  # total cost: hour
 
 
@@ -289,6 +290,7 @@ def create_igraph_network(
     edgeLengthList = []
     edgeTypeList = []
     edgeFormList = []
+    edgeTollList = []
     for _, link in road_links.iterrows():
         edge_name = link.e_id
         edge_from = link.from_id
@@ -296,11 +298,13 @@ def create_igraph_network(
         edge_length = link.geometry.length * cons.CONV_METER_TO_MILE  # miles
         edge_type = link.road_classification[0]
         edge_form = link.form_of_way
+        edge_toll = link.average_toll_cost
         edgeNameList.append(edge_name)
         edgeList.append((name_to_index[edge_from], name_to_index[edge_to]))
         edgeLengthList.append(edge_length)
         edgeTypeList.append(edge_type)
         edgeFormList.append(edge_form)
+        edgeTollList.append(edge_toll)
 
     edgeSpeedList = np.vectorize(initial_speed_func)(
         edgeTypeList,
@@ -313,7 +317,9 @@ def create_igraph_network(
 
     # total travel cost (time-equivalent)
     vocList = np.vectorize(voc_func)(edgeSpeedList)  # £/km
-    costList = np.vectorize(cost_func)(timeList, edgeLengthList, vocList)  # hour
+    costList = np.vectorize(cost_func)(
+        timeList, edgeLengthList, vocList, edgeTollList
+    )  # hour
     weightList = (costList * 3600).tolist()  # seconds
 
     test_net = igraph.Graph(directed=False)
@@ -404,6 +410,7 @@ def update_network_structure(
     network: igraph.Graph,
     length_dict: dict,
     speed_dict: dict,
+    toll_dict: dict,
     temp_edge_flow: pd.DataFrame,
 ) -> Tuple[igraph.Graph, dict, dict]:
     zero_capacity_edges = set(
@@ -430,13 +437,18 @@ def update_network_structure(
     timeList = np.where(
         np.array(speedList) != 0, np.array(lengthList) / np.array(speedList), np.nan
     )  # hours
+    tollList = np.where(
+        map(toll_dict.get, filter(toll_dict.__contains__, remaining_edges))
+    )
 
     if np.isnan(timeList).any():
         print("ERROR: Network contains congested edges.")
         exit()
     else:
         vocList = np.vectorize(voc_func)(speedList)
-        costList = np.vectorize(cost_func)(timeList, lengthList, vocList)  # hours
+        costList = np.vectorize(cost_func)(
+            timeList, lengthList, vocList, tollList
+        )  # hours
         weightList = (costList * 3600).tolist()  # seconds
         network.es["weight"] = weightList
 
@@ -506,6 +518,7 @@ def network_flow_model(
     edge_length_dict = (
         road_links.set_index(col_eid)["geometry"].length * cons.CONV_METER_TO_MILE
     ).to_dict()
+    # !!! add a toll dict
     edge_toll_dict = road_links.set_index(col_eid)["average_toll_cost"].to_dict()
 
     acc_flow_dict = road_links.set_index(col_eid)["acc_flow"].to_dict()
@@ -733,7 +746,7 @@ def network_flow_model(
         # update network structure (nodes and edges)
         #!!! update edge-related costs
         network, edge_index_to_name, edge_cost_dict = update_network_structure(
-            network, edge_length_dict, acc_speed_dict, temp_edge_flow
+            network, edge_length_dict, acc_speed_dict, edge_toll_dict, temp_edge_flow
         )
 
         iter_flag += 1
