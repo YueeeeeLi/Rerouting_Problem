@@ -41,6 +41,10 @@ with open(base_path / "parameters" / "min_speed_cap.json", "r") as f:
 with open(base_path / "parameters" / "urban_speed_cap.json", "r") as f:
     urban_speed_cap = json.load(f)
 
+with open(base_path / "parameters" / "flooded_road_links.json", "r") as f:
+    flooded_road_list = json.load(f)
+
+# %%
 # OS open roads
 osoprd_link = gpd.read_parquet(
     base_path / "networks" / "road" / "osoprd_road_links.geoparquet"
@@ -62,30 +66,6 @@ zone_centroids = gpd.read_parquet(
 )
 
 # %%
-# O-D matrix (OA, 2011)
-od_gb_2011 = pd.read_csv(
-    base_path / "census_datasets" / "od_matrix" / "od_gb_2011_disaggregate_oa.csv"
-)
-od_gb_2011.rename(
-    columns={
-        "origins": "Area of usual residence",
-        "destinations": "Area of workplace",
-        "counts": "car",
-    },
-    inplace=True,
-)
-# case study: trips related to ppl living/working in London
-oa_selected = gpd.read_file(casestudy_path / "inputs" / "oa_selected.csv")
-oaList = oa_selected.OA21CD.unique().tolist()
-od_df = od_gb_2011[
-    (
-        od_gb_2011["Area of usual residence"].isin(oaList)
-        | (od_gb_2011["Area of workplace"].isin(oaList))
-    )
-]
-od_df.reset_index(drop=True, inplace=True)
-
-# %%
 # select major roads
 road_link_file, road_node_file = func.select_partial_roads(
     road_links=osoprd_link,
@@ -97,6 +77,14 @@ road_link_file, road_node_file = func.select_partial_roads(
 # classify the selected major road links into urban/suburban
 urban_mask = func.create_urban_mask(etisplus_urban_roads)
 road_link_file = func.label_urban_roads(road_link_file, urban_mask)
+
+# drop disrupted roads if necessary (optional)
+user_input = input("Please choose a scenario (base/flooded): ")
+if user_input != "base" and user_input != "flooded":
+    print("Error: please check the scenario input!")
+if user_input == "flooded":
+    road_link_file = road_link_file[~road_link_file.e_id.isin(flooded_road_list)]
+    road_link_file.reset_index(drop=True, inplace=True)
 
 # attach toll charges to the selected major roads
 tolls = pd.read_csv(base_path / "networks" / "road" / "tolls.csv")
@@ -110,6 +98,37 @@ road_link_file["average_toll_cost"] = road_link_file["e_id"].apply(
 road_link_file.loc[
     road_link_file.road_classification_number == "M6", "average_toll_cost"
 ] = 8.0  # £/car
+
+# %%
+# O-D matrix (2011)
+od_df = pd.read_csv(base_path / "census_datasets" / "od_matrix" / "od_gb_2011.csv")
+print(f"total flows: {od_df.car.sum()}")  # 14_203_635 trips/day
+
+# %%
+#!!!  O-D matrix (selected-OA, 2011)
+od_gb_oa = pd.read_csv(
+    base_path / "census_datasets" / "od_matrix" / "od_gb_2011_disaggregate_oa.csv"
+)
+od_gb_oa.rename(
+    columns={
+        "origins": "Area of usual residence",
+        "destinations": "Area of workplace",
+        "counts": "car",
+    },
+    inplace=True,
+)
+
+#!!! for case study
+oa_selected = pd.read_csv(casestudy_path / "inputs" / "oa_selected.csv")
+oa_set = set(oa_selected.OA21CD.unique())
+od_df = od_gb_oa[
+    od_gb_oa["Area of usual residence"].isin(oa_set)
+    | od_gb_oa["Area of workplace"].isin(oa_set)
+]
+od_df.reset_index(drop=True, inplace=True)
+
+#!!! for debugging only
+od_df = od_df.head(100000)
 
 # %%
 # find the nearest road node for each zone
@@ -132,10 +151,11 @@ list_of_origin_nodes.sort()
 # network creation (igragh)
 node_name_to_index = {name: index for index, name in enumerate(road_node_file.nd_id)}
 node_index_to_name = {value: key for key, value in node_name_to_index.items()}
-# !!! edge_voc_dict
-test_net_ig, edge_cost_dict = func.create_igraph_network(
-    node_name_to_index, road_link_file, road_node_file, free_flow_speed_dict
-)
+test_net_ig, edge_cost_dict, edge_timeC_dict, edge_operateC_dict = (
+    func.create_igraph_network(
+        node_name_to_index, road_link_file, road_node_file, free_flow_speed_dict
+    )
+)  # this returns a network and edge weights dict(edge_name, edge_weight)
 edge_index_to_name = {idx: name for idx, name in enumerate(test_net_ig.es["edge_name"])}
 
 # network initialisation
@@ -148,9 +168,11 @@ road_link_file = func.initialise_igraph_network(
 
 # %%
 # flow simulation
-speed_dict, acc_flow_dict, acc_capacity_dict, odpf_df = func.network_flow_model(
+speed_dict, acc_flow_dict, acc_capacity_dict = func.network_flow_model(
     test_net_ig,  # network
-    edge_cost_dict,  # !!! edge_voc_dict
+    edge_cost_dict,  #!!!
+    edge_timeC_dict,  # !!!
+    edge_operateC_dict,  # !!!
     road_link_file,  # road
     node_name_to_index,  # road
     edge_index_to_name,  # road
@@ -177,7 +199,7 @@ road_link_file.acc_capacity = road_link_file.acc_capacity.astype(int)
 # %%
 # export files
 road_link_file.to_file(
-    casestudy_path / "outputs" / "base_edge_flows.gpkg",
+    casestudy_path / "outputs" / "base_edge_flows_thames.gpkg",
     driver="GPKG",
+    engine="pyogrio",
 )
-odpf_df.to_csv(casestudy_path / "outputs" / "base_odpf.csv", index=False)
