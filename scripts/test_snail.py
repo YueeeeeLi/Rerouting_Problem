@@ -3,9 +3,9 @@ import geopandas as gpd
 import snail.intersection
 import snail.io
 
-floodPath = r"C:\Oxford\Research\CONFERENCE\analysis\SW09Q75B_London.tif"
-roadPath = r"C:\Oxford\Research\CONFERENCE\analysis\roads_london.gpkg"
-outPath = r"C:\Oxford\Research\CONFERENCE\analysis\exporture.gpkg"
+floodPath = r"C:\Oxford\Research\git_prjs\inputs\River08Q100B_Clip.tif"
+roadPath = r"C:\Oxford\Research\git_prjs\inputs\selectef_flooded_roads.gpkg"
+outPath = r"C:\Oxford\Research\git_prjs\outputs\exporture.gpkg"
 roads = gpd.read_file(roadPath, engine="pyogrio")
 roads2 = roads[
     [
@@ -27,6 +27,7 @@ grid, bands = snail.io.read_raster_metadata(floodPath)
 prepared = snail.intersection.prepare_linestrings(roads2)
 flood_intersections = snail.intersection.split_linestrings(prepared, grid)
 flood_intersections = snail.intersection.apply_indices(flood_intersections, grid)
+# %%
 flood_intersections["level_of_flood"] = snail.intersection.get_raster_values_for_splits(
     flood_intersections, flood_data
 )
@@ -36,5 +37,5 @@ roads_flooddepth = flood_intersections.groupby(by=["id"], as_index=False).agg(
 )
 
 roads_flooddepth.to_csv(
-    r"C:\Oxford\Research\git_prjs\outputs\flooded_roads.csv", index=False
+    r"C:\Oxford\Research\git_prjs\outputs\flooded_roads_river.csv", index=False
 )
