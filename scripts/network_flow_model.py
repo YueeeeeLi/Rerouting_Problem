@@ -127,9 +127,6 @@ od_df = od_gb_oa[
 ]
 od_df.reset_index(drop=True, inplace=True)
 
-#!!! for debugging only
-od_df = od_df.head(100000)
-
 # %%
 # find the nearest road node for each zone
 zone_to_node = func.find_nearest_node(zone_centroids, road_node_file)

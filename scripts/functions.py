@@ -188,7 +188,7 @@ def speed_flow_func(
                 return min(urban_speed_cap["A_dual"], initial_speed)
             else:
                 return initial_speed
-    elif road_type == "B":
+    elif road_type == "B":  # constant
         initial_speed = free_flow_speed_dict["B"]
         if isurban:
             return min(urban_speed_cap["B"], initial_speed)
